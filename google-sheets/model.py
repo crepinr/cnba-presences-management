@@ -453,6 +453,41 @@ def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False
         #ADD DATA COUNT
         worksheet.add_cols(2)
         worksheet.update(f'{list_collumns[-2]}3:{list_collumns[-1]}3',[['Présences %','Nbre Entr.']])
+
+        #HIGHLIGHT PRESENCES
+        worksheet.spreadsheet.batch_update({
+            "requests": [
+                {
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [
+                                {
+                                    "sheetId": worksheet.id,
+                                    "startRowIndex": 3,
+                                    "endRowIndex": 3 + len(membres_groupe),
+                                    "startColumnIndex": 3,
+                                    "endColumnIndex": column_letter_to_index(list_collumns[-3]) + 1
+                                }
+                            ],
+                            "booleanRule": {
+                                "condition": {
+                                    "type": "TEXT_EQ",
+                                    "values": [{"userEnteredValue": "V"}]
+                                },
+                                "format": {
+                                    "backgroundColor": {
+                                        "red": 0.0,
+                                        "green": 1.0,
+                                        "blue": 0.0
+                                    }
+                                }
+                            }
+                        },
+                        "index": 0
+                    }
+                }
+            ]
+        })
         
         #PERCENTAGE
         print(f'---------- ADDING PERCENTAGE')
