@@ -16,7 +16,9 @@ RED = "\033[31m"
 RESET = "\033[0m"
 
 ### PARAMETERS TO CHECK 
-# conf.folder_id -> Folder in which the script is applied
+# conf.folder_id -> Google Folder in which the script is applied
+# SHEETS_TO_MODIFY -> Optional parameter, name of the group not the sheet like 'Elite',
+#                      if empty it is by default applied to all sheets in the folder
 
 ### SCRIPT PARAMETERS 
 
