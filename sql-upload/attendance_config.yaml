@@ -1,0 +1,41 @@
+# attendance_config.yaml
+#
+# Point d'entrée du pipeline Presence Analytics.
+# Seuls les groupes avec active: true sont téléchargés, nettoyés et inclus
+# dans le fichier SQL unique généré par run_attendance_pipeline.sh.
+
+season:
+  code: "2026-2027"
+  start_year: 2026
+  end_year: 2027
+
+paths:
+  input_dir: "Input"
+  output_dir: "output"
+  pickle_dir_template: "output/pickle/{slug}"
+  clean_up_dir_template: "output/clean_up/{slug}"
+
+groups:
+  elite:
+    label: "Elite"
+    active: true
+    db_group_id:
+    google_sheet:
+      # La clé suffit. L'URL complète est aussi acceptée.
+      key: "1gpe5ugrSzvx_lAehqDxV7eYewJdWH8dNeoFd4GLzU-o"
+      url: "https://docs.google.com/spreadsheets/d/1gpe5ugrSzvx_lAehqDxV7eYewJdWH8dNeoFd4GLzU-o/edit?gid=0#gid=0"
+
+  elite_jeunes:
+    label: "Elite Jeunes"
+    active: false
+    db_group_id:
+    google_sheet:
+      key: "1ni3HTHVQNjnaAkT4FZGsd-YlBbKV1NmSpAZrF4Q-Jqw"
+      url: "https://docs.google.com/spreadsheets/d/1ni3HTHVQNjnaAkT4FZGsd-YlBbKV1NmSpAZrF4Q-Jqw/edit?gid=0#gid=0"
+
+  exemple_inactif:
+    label: "Exemple Inactif"
+    active: false
+    db_group_id:
+    google_sheet:
+      key: "REMPLACER_PAR_LA_CLE_GOOGLE_SHEET"

@@ -1,0 +1,33 @@
+# Secrets et identifiants locaux
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/client_key.json
+**/*credentials*.json
+**/*service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Donnees locales, exports et artefacts generes
+sql-upload/Input/
+sql-upload/Output/
+sql-upload/output/
+sql-upload/logs/
+sql-upload/*.log
+sql-upload/*.zip
+*.pkl
+*.sql
+
+# Fichiers locaux du systeme et des IDE
+.DS_Store
+.idea/
+.vscode/
