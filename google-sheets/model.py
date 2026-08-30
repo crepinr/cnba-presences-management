@@ -14,7 +14,8 @@ import urllib.parse
 import string
 import itertools
 import gspread
-from gspread.http_client import BackOffHTTPClient
+from gspread.exceptions import APIError
+from gspread.http_client import HTTPClient
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import pymysql
@@ -36,6 +37,45 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 RESET = "\033[0m"
 LIST_MONTHS_TO_ADAPT = ['janvier','février','mars', 'avril', 'mai', 'juin', 'juillet', 'septembre', 'octobre', 'novembre', 'décembre']
+
+class VisibleBackOffHTTPClient(HTTPClient):
+    """Retry transient Google API errors and report every wait."""
+
+    MAX_ATTEMPTS = 8
+
+    @staticmethod
+    def retry_reason(error):
+        if error.code == 429:
+            return 'quota Google Sheets atteint (429)'
+        if error.code == 408:
+            return 'délai de requête dépassé (408)'
+        if error.code >= 500:
+            return f'erreur temporaire du serveur Google ({error.code})'
+        if error.code == 403:
+            errors = error.error.get('errors', [])
+            if errors and errors[0].get('domain') == 'usageLimits':
+                return 'quota Google Drive atteint (403 usageLimits)'
+        return None
+
+    def request(self, *args, **kwargs):
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            try:
+                response = super().request(*args, **kwargs)
+                if attempt > 1:
+                    print(f'{GREEN}API Google de nouveau disponible. Reprise.{RESET}')
+                return response
+            except APIError as error:
+                reason = self.retry_reason(error)
+                if reason is None or attempt == self.MAX_ATTEMPTS:
+                    raise
+
+                wait_seconds = min(2 ** attempt, 128)
+                print(
+                    f'{YELLOW}{reason.capitalize()}. '
+                    f'Attente de {wait_seconds} secondes avant la tentative '
+                    f'{attempt}/{self.MAX_ATTEMPTS - 1}.{RESET}'
+                )
+                time.sleep(wait_seconds)
 
 ######################
 ######## DB #########
@@ -127,7 +167,7 @@ def init_client_drive():
     creds = ServiceAccountCredentials.from_json_keyfile_name(file_name,scope)
     # Retry quota errors with exponential backoff instead of failing or sleeping
     # after every worksheet operation.
-    client = gspread.authorize(creds, http_client=BackOffHTTPClient)
+    client = gspread.authorize(creds, http_client=VisibleBackOffHTTPClient)
 
     return client
 

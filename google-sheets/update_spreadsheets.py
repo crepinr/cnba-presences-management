@@ -26,11 +26,11 @@ UPDATE_DB = False
 REMOVE_MEMBERS = True
 REMOVE_MEMBERS_AUCUN = True
 ADD_MEMBERS = True
-ADD_MONTHS = False
+ADD_MONTHS = True
 ADD_PROTECTED_RANGE = True
 ADD_CONDITIONAL_FORMAT = True
 
-SHEETS_TO_MODIFY = ['Elite Jeunes']
+SHEETS_TO_MODIFY = ['Avenir 2']
 
 ############################
 ### MAIN 

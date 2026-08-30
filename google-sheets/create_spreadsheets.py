@@ -27,7 +27,7 @@ import config
 UPDATE = False
 TEST = False
 ADD_CONDITIONAL_FORMAT = True
-list_groups = [3,6,7,8,36,37,41,43,44,45,105,110,118,119]
+list_groups = [36,37,41,43,44,45,105,110,118,119]
 
 if __name__ == '__main__':
     conf = config.config()
