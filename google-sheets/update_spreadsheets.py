@@ -28,6 +28,7 @@ REMOVE_MEMBERS_AUCUN = True
 ADD_MEMBERS = True
 ADD_MONTHS = False
 ADD_PROTECTED_RANGE = False
+ADD_CONDITIONAL_FORMAT = False
 
 SHEETS_TO_MODIFY = ['Elite']
 
@@ -96,10 +97,18 @@ if __name__ == "__main__":
                     # Add missing months if eventually not all would be present
                     nom_groupe = sheet['name']
                     groupe_id = df_groupes.loc[df_groupes['nom_groupe'] == nom_groupe, 'id'].iloc[0]
-                    model.add_months(groupe_id, spreadsheet,membres_groupe_db)
+                    model.add_months(
+                        groupe_id,
+                        spreadsheet,
+                        membres_groupe_db,
+                        add_conditional_format=ADD_CONDITIONAL_FORMAT
+                    )
 
                 if ADD_PROTECTED_RANGE:
                     model.add_protection(spreadsheet)
+
+                if ADD_CONDITIONAL_FORMAT:
+                    model.add_presence_conditional_formatting(spreadsheet, len(membres_groupe_db))
 
                 print(f'##### SLEEPING 10 SECONDS BETWEEN SPREADSHEETS #####')
                 time.sleep(10)
@@ -115,4 +124,3 @@ if __name__ == "__main__":
     
 
    
-    

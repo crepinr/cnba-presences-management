@@ -151,6 +151,75 @@ def column_letter_to_index(column_letter):
         index = index * 26 + (ord(char.upper()) - ord('A')) + 1
     return index - 1  # Convert to zero-based index
 
+def _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count):
+    return {
+        "ranges": [
+            {
+                "sheetId": worksheet.id,
+                "startRowIndex": 3,
+                "endRowIndex": 3 + swimmer_count,
+                "startColumnIndex": 3,
+                "endColumnIndex": end_column_index
+            }
+        ],
+        "booleanRule": {
+            "condition": {
+                "type": "TEXT_EQ",
+                "values": [{"userEnteredValue": "V"}]
+            },
+            "format": {
+                "backgroundColor": {
+                    "red": 0.0,
+                    "green": 1.0,
+                    "blue": 0.0
+                }
+            }
+        }
+    }
+
+def _is_presence_conditional_format(rule):
+    ranges = rule.get("ranges", [])
+    condition = rule.get("booleanRule", {}).get("condition", {})
+    values = condition.get("values", [])
+    return (
+        len(ranges) == 1
+        and ranges[0].get("startColumnIndex") == 3
+        and ranges[0].get("startRowIndex") == 3
+        and condition.get("type") == "TEXT_EQ"
+        and values == [{"userEnteredValue": "V"}]
+    )
+
+def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, existing_rules=None):
+    """Add or update the V/green rule for one attendance input grid."""
+    if swimmer_count <= 0:
+        return False
+
+    rule = _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count)
+    existing_rules = existing_rules or []
+
+    for index, existing_rule in enumerate(existing_rules):
+        if _is_presence_conditional_format(existing_rule):
+            if existing_rule == rule:
+                return False
+            request = {
+                "updateConditionalFormatRule": {
+                    "sheetId": worksheet.id,
+                    "index": index,
+                    "rule": rule
+                }
+            }
+            break
+    else:
+        request = {
+            "addConditionalFormatRule": {
+                "rule": rule,
+                "index": 0
+            }
+        }
+
+    worksheet.spreadsheet.batch_update({"requests": [request]})
+    return True
+
 ######################
 ####### LOGIC ########
 ######################
@@ -325,7 +394,7 @@ def list_sheets(list_files):
 ####### FEATURES ######
 #######################
 
-def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False):
+def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False, add_conditional_format=True):
     if not test:
         list_months = [9,10,11,12,1,2,3,4,5,6]
     else:
@@ -454,40 +523,12 @@ def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False
         worksheet.add_cols(2)
         worksheet.update(f'{list_collumns[-2]}3:{list_collumns[-1]}3',[['Présences %','Nbre Entr.']])
 
-        #HIGHLIGHT PRESENCES
-        worksheet.spreadsheet.batch_update({
-            "requests": [
-                {
-                    "addConditionalFormatRule": {
-                        "rule": {
-                            "ranges": [
-                                {
-                                    "sheetId": worksheet.id,
-                                    "startRowIndex": 3,
-                                    "endRowIndex": 3 + len(membres_groupe),
-                                    "startColumnIndex": 3,
-                                    "endColumnIndex": column_letter_to_index(list_collumns[-3]) + 1
-                                }
-                            ],
-                            "booleanRule": {
-                                "condition": {
-                                    "type": "TEXT_EQ",
-                                    "values": [{"userEnteredValue": "V"}]
-                                },
-                                "format": {
-                                    "backgroundColor": {
-                                        "red": 0.0,
-                                        "green": 1.0,
-                                        "blue": 0.0
-                                    }
-                                }
-                            }
-                        },
-                        "index": 0
-                    }
-                }
-            ]
-        })
+        if add_conditional_format:
+            set_presence_conditional_format(
+                worksheet,
+                column_letter_to_index(list_collumns[-3]) + 1,
+                len(membres_groupe)
+            )
         
         #PERCENTAGE
         print(f'---------- ADDING PERCENTAGE')
@@ -538,7 +579,7 @@ def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False
         print(f'{YELLOW}##### SLEEPING {sleep} SECONDS BETWEEN WORKSHEET #####{RESET}')
         time.sleep(sleep)
 
-def create_spreadsheets(conf, update=False, test = False, list_groups=[]):
+def create_spreadsheets(conf, update=False, test=False, list_groups=[], add_conditional_format=True):
     
     # DF MEMBRES AND GROUPES
     df_membres, df_groupes = read_db(update)
@@ -567,7 +608,14 @@ def create_spreadsheets(conf, update=False, test = False, list_groups=[]):
             membres_groupe['date_naissance'] = membres_groupe['date_naissance'].astype(str)
             #print(membres_groupe)
             
-            create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=test)            
+            create_presence_spreadsheet(
+                membres_groupe,
+                client,
+                groupe,
+                conf,
+                test=test,
+                add_conditional_format=add_conditional_format
+            )
 
     return None
 
@@ -712,6 +760,37 @@ def get_column_index_presences(ws):
 
     return column_index
 
+def add_presence_conditional_formatting(spreadsheet, swimmer_count):
+    """Apply the attendance rule to existing month sheets without duplicating it."""
+    metadata = spreadsheet.fetch_sheet_metadata(
+        params={"fields": "sheets(properties(sheetId),conditionalFormats)"}
+    )
+    metadata_by_id = {
+        sheet["properties"]["sheetId"]: sheet.get("conditionalFormats", [])
+        for sheet in metadata.get("sheets", [])
+    }
+
+    updated = False
+    month_worksheets = [
+        worksheet
+        for worksheet in spreadsheet.worksheets()
+        if worksheet.title in LIST_MONTHS_TO_ADAPT
+    ]
+    for worksheet in month_worksheets:
+        end_column_index = get_column_index_presences(worksheet)
+        if set_presence_conditional_format(
+            worksheet,
+            end_column_index,
+            swimmer_count,
+            existing_rules=metadata_by_id.get(worksheet.id, [])
+        ):
+            updated = True
+
+    if not updated:
+        print(f'{YELLOW}---- NO MISSING CONDITIONAL FORMAT ----{RESET}')
+
+    return updated
+
 def add_members(list_nomsprenoms_drive,list_nomsprenoms_db, worksheet, spreadsheet, membres_groupe_db):
     #ADD MEMBERS
     #compare and get deleted names
@@ -855,7 +934,7 @@ def missing_months(spreadsheet,list_months):
 
     return months_to_add_numbers
 
-def add_months(groupe, spreadsheet,membres_groupe_db, list_months = [9,10,11,12,1,2,3,4,5,6]):  
+def add_months(groupe, spreadsheet, membres_groupe_db, list_months=[9,10,11,12,1,2,3,4,5,6], add_conditional_format=True):
     sleep = 20
     file = spreadsheet
 
@@ -970,6 +1049,13 @@ def add_months(groupe, spreadsheet,membres_groupe_db, list_months = [9,10,11,12,
             #ADD DATA COUNT
             worksheet.add_cols(2)
             worksheet.update(f'{list_collumns[-2]}3:{list_collumns[-1]}3',[['Présences %','Nbre Entr.']])
+
+            if add_conditional_format:
+                set_presence_conditional_format(
+                    worksheet,
+                    column_letter_to_index(list_collumns[-3]) + 1,
+                    len(membres_groupe_db)
+                )
             
             #PERCENTAGE
             print(f'---------- ADDING PERCENTAGE')

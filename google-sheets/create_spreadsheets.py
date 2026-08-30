@@ -16,8 +16,15 @@ import config
 
 UPDATE = False
 TEST = False
+ADD_CONDITIONAL_FORMAT = True
 list_groups = [2]   
 
 if __name__ == '__main__':
     conf = config.config()
-    model.create_spreadsheets(conf, update=UPDATE, test = TEST, list_groups=list_groups)
+    model.create_spreadsheets(
+        conf,
+        update=UPDATE,
+        test=TEST,
+        list_groups=list_groups,
+        add_conditional_format=ADD_CONDITIONAL_FORMAT
+    )
