@@ -151,7 +151,16 @@ def column_letter_to_index(column_letter):
         index = index * 26 + (ord(char.upper()) - ord('A')) + 1
     return index - 1  # Convert to zero-based index
 
-def _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count):
+PRESENCE_CONDITIONAL_FORMATS = {
+    "v": {"red": 0.0, "green": 1.0, "blue": 0.0},
+    "x": {"red": 1.0, "green": 0.0, "blue": 0.0},
+    "o": {"red": 0.65, "green": 0.65, "blue": 0.65},
+    "e": {"red": 1.0, "green": 1.0, "blue": 0.0},
+    "m": {"red": 1.0, "green": 1.0, "blue": 0.0},
+    "c": {"red": 0.75, "green": 0.0, "blue": 1.0},
+}
+
+def _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count, value, color):
     return {
         "ranges": [
             {
@@ -165,14 +174,10 @@ def _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count
         "booleanRule": {
             "condition": {
                 "type": "TEXT_EQ",
-                "values": [{"userEnteredValue": "V"}]
+                "values": [{"userEnteredValue": value}]
             },
             "format": {
-                "backgroundColor": {
-                    "red": 0.0,
-                    "green": 1.0,
-                    "blue": 0.0
-                }
+                "backgroundColor": color
             }
         }
     }
@@ -186,38 +191,78 @@ def _is_presence_conditional_format(rule):
         and ranges[0].get("startColumnIndex") == 3
         and ranges[0].get("startRowIndex") == 3
         and condition.get("type") == "TEXT_EQ"
-        and values == [{"userEnteredValue": "V"}]
+        and len(values) == 1
+        and values[0].get("userEnteredValue", "").lower() in PRESENCE_CONDITIONAL_FORMATS
+    )
+
+def _presence_conditional_format_signature(rule):
+    grid_range = rule["ranges"][0]
+    condition = rule["booleanRule"]["condition"]
+    color = rule["booleanRule"]["format"].get("backgroundColor", {})
+    return (
+        grid_range.get("startRowIndex"),
+        grid_range.get("endRowIndex"),
+        grid_range.get("startColumnIndex"),
+        grid_range.get("endColumnIndex"),
+        condition["values"][0].get("userEnteredValue", "").lower(),
+        color.get("red", 0.0),
+        color.get("green", 0.0),
+        color.get("blue", 0.0),
     )
 
 def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, existing_rules=None):
-    """Add or update the V/green rule for one attendance input grid."""
+    """Synchronize attendance fill-color rules for one input grid."""
     if swimmer_count <= 0:
         return False
 
-    rule = _presence_conditional_format_rule(worksheet, end_column_index, swimmer_count)
+    rules = [
+        _presence_conditional_format_rule(
+            worksheet,
+            end_column_index,
+            swimmer_count,
+            value,
+            color
+        )
+        for value, color in PRESENCE_CONDITIONAL_FORMATS.items()
+    ]
     existing_rules = existing_rules or []
+    managed_rules = [
+        (index, rule)
+        for index, rule in enumerate(existing_rules)
+        if _is_presence_conditional_format(rule)
+    ]
 
-    for index, existing_rule in enumerate(existing_rules):
-        if _is_presence_conditional_format(existing_rule):
-            if existing_rule == rule:
-                return False
-            request = {
-                "updateConditionalFormatRule": {
-                    "sheetId": worksheet.id,
-                    "index": index,
-                    "rule": rule
-                }
+    existing_signatures = sorted(
+        _presence_conditional_format_signature(rule)
+        for _, rule in managed_rules
+    )
+    expected_signatures = sorted(
+        _presence_conditional_format_signature(rule)
+        for rule in rules
+    )
+    if existing_signatures == expected_signatures:
+        return False
+
+    requests = [
+        {
+            "deleteConditionalFormatRule": {
+                "sheetId": worksheet.id,
+                "index": index
             }
-            break
-    else:
-        request = {
+        }
+        for index, _ in reversed(managed_rules)
+    ]
+    requests.extend(
+        {
             "addConditionalFormatRule": {
                 "rule": rule,
                 "index": 0
             }
         }
+        for rule in reversed(rules)
+    )
 
-    worksheet.spreadsheet.batch_update({"requests": [request]})
+    worksheet.spreadsheet.batch_update({"requests": requests})
     return True
 
 ######################
