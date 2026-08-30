@@ -210,10 +210,9 @@ def _presence_conditional_format_signature(rule):
         color.get("blue", 0.0),
     )
 
-def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, existing_rules=None):
-    """Synchronize attendance fill-color rules for one input grid."""
+def _presence_conditional_format_requests(worksheet, end_column_index, swimmer_count, existing_rules=None):
     if swimmer_count <= 0:
-        return False
+        return []
 
     rules = [
         _presence_conditional_format_rule(
@@ -241,7 +240,7 @@ def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, 
         for rule in rules
     )
     if existing_signatures == expected_signatures:
-        return False
+        return []
 
     requests = [
         {
@@ -261,6 +260,19 @@ def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, 
         }
         for rule in reversed(rules)
     )
+
+    return requests
+
+def set_presence_conditional_format(worksheet, end_column_index, swimmer_count, existing_rules=None):
+    """Synchronize attendance fill-color rules for one input grid."""
+    requests = _presence_conditional_format_requests(
+        worksheet,
+        end_column_index,
+        swimmer_count,
+        existing_rules
+    )
+    if not requests:
+        return False
 
     worksheet.spreadsheet.batch_update({"requests": requests})
     return True
@@ -439,13 +451,181 @@ def list_sheets(list_files):
 ####### FEATURES ######
 #######################
 
+def populate_presence_month(worksheet, month_name, results, swimmer_count, add_conditional_format=True):
+    """Populate one monthly worksheet using a small number of batched API calls."""
+    list_collumns, indexes, dates, days_names = results
+    last_date_column = list_collumns[-3]
+    percent_column = list_collumns[-2]
+    presence_count_column = list_collumns[-1]
+
+    range_dates = f'{list_collumns[0]}2:{last_date_column}2'
+    range_days = f'{list_collumns[0]}3:{last_date_column}3'
+    range_formulas = f'{percent_column}4:{percent_column}{3 + swimmer_count}'
+    range_presence = f'{presence_count_column}4:{presence_count_column}{3 + swimmer_count}'
+    range_swimmers_formulas = (
+        f'{list_collumns[0]}{5 + swimmer_count}:'
+        f'{last_date_column}{5 + swimmer_count}'
+    )
+
+    formulas_list_percent = []
+    formulas_list_presence = []
+    for row_number in range(4, 4 + swimmer_count):
+        attendance_range = f'D{row_number}:{last_date_column}{row_number}'
+        formulas_list_percent.append([
+            f'=NB.SI({attendance_range};"v")/'
+            f'(${percent_column}$1-NB.VIDE({attendance_range})'
+            f'-NB.SI({attendance_range};"b")'
+            f'-NB.SI({attendance_range};"o")'
+            f'-NB.SI({attendance_range};"m"))'
+        ])
+        formulas_list_presence.append([f'=NB.SI({attendance_range};"v")'])
+
+    formulas_list_swimmers = []
+    for column in list_collumns[:len(dates)]:
+        attendance_range = f'{column}4:{column}{3 + swimmer_count}'
+        formulas_list_swimmers.append(f'=NB.SI({attendance_range};"v")')
+
+    print('---------- ADDING VALUES')
+    raw_values = [
+        {'range': 'A1', 'values': [[month_name]]},
+        {'range': 'C2', 'values': [['Dates']]},
+        {'range': range_dates, 'values': [dates]},
+        {'range': 'C3', 'values': [['Jours']]},
+        {'range': range_days, 'values': [days_names]},
+        {
+            'range': f'{percent_column}3:{presence_count_column}3',
+            'values': [['Présences %', 'Nbre Entr.']]
+        },
+    ]
+    worksheet.batch_update(raw_values, value_input_option='RAW')
+
+    print('---------- ADDING FORMULAS')
+    formulas = [
+        {
+            'range': 'A4',
+            'values': [['=IMPORTRANGE(Groupe!D2;"Groupe!A2:C30")']]
+        },
+        {'range': range_formulas, 'values': formulas_list_percent},
+        {
+            'range': f'{percent_column}1',
+            'values': [[f'=NB.VIDE(D1:{last_date_column}1)']]
+        },
+        {'range': range_presence, 'values': formulas_list_presence},
+        {'range': range_swimmers_formulas, 'values': [formulas_list_swimmers]},
+    ]
+    worksheet.batch_update(formulas, value_input_option='USER_ENTERED')
+
+    print('---------- ADDING FORMATS')
+    worksheet.batch_format([
+        {
+            'range': 'A1',
+            'format': {
+                'backgroundColor': {
+                    'red': 236/255,
+                    'green': 155/255,
+                    'blue': 155/255
+                },
+                'textFormat': {'bold': True}
+            }
+        },
+        {
+            'range': 'C2',
+            'format': {
+                'backgroundColor': {
+                    'red': 252/255,
+                    'green': 202/255,
+                    'blue': 159/255
+                }
+            }
+        },
+        {
+            'range': range_dates,
+            'format': {
+                'backgroundColor': {
+                    'red': 252/255,
+                    'green': 202/255,
+                    'blue': 159/255
+                },
+                'textRotation': {'angle': 90}
+            }
+        },
+        {
+            'range': 'C3',
+            'format': {
+                'backgroundColor': {
+                    'red': 156/255,
+                    'green': 198/255,
+                    'blue': 230/255
+                }
+            }
+        },
+        {
+            'range': range_days,
+            'format': {
+                'backgroundColor': {
+                    'red': 156/255,
+                    'green': 198/255,
+                    'blue': 230/255
+                }
+            }
+        },
+        {
+            'range': range_formulas,
+            'format': {'numberFormat': {'type': 'PERCENT'}}
+        },
+    ])
+
+    print('---------- ADDING STRUCTURE')
+    structural_requests = [
+        {
+            'appendDimension': {
+                'sheetId': worksheet.id,
+                'dimension': 'COLUMNS',
+                'length': 2
+            }
+        },
+        {
+            'autoResizeDimensions': {
+                'dimensions': {
+                    'sheetId': worksheet.id,
+                    'dimension': 'COLUMNS',
+                    'startIndex': indexes[0],
+                    'endIndex': indexes[1]
+                }
+            }
+        },
+        {
+            'addProtectedRange': {
+                'protectedRange': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 40,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': 3
+                    },
+                    'editors': {
+                        'users': ['technique.cnba@gmail.com']
+                    }
+                }
+            }
+        },
+    ]
+    if add_conditional_format:
+        structural_requests.extend(
+            _presence_conditional_format_requests(
+                worksheet,
+                column_letter_to_index(last_date_column) + 1,
+                swimmer_count
+            )
+        )
+    worksheet.spreadsheet.batch_update({'requests': structural_requests})
+
 def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False, add_conditional_format=True):
     if not test:
         list_months = [9,10,11,12,1,2,3,4,5,6]
     else:
         list_months = [9,10]
-    sleep = 20
-
     #CREATE SHEET
     nom_sheet = f'Presences {groupe["nom_groupe"]}'
     file = create_spreadsheet(client, nom_sheet, conf)
@@ -454,8 +634,17 @@ def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False
     print(f'{BLUE}----- SHEET GROUPE{RESET}')
     worksheet = file.get_worksheet(0)
     worksheet.update_title("Groupe")
-    worksheet.update([membres_groupe.columns.values.tolist()] + membres_groupe.values.tolist())
-    worksheet.update_acell('D2',file.id)
+    groupe_values = [membres_groupe.columns.values.tolist()] + membres_groupe.values.tolist()
+    worksheet.batch_update([
+        {
+            'range': f'A1:C{len(groupe_values)}',
+            'values': groupe_values
+        },
+        {
+            'range': 'D2',
+            'values': [[file.id]]
+        },
+    ], value_input_option='RAW')
     worksheet.add_protected_range('A1:D40', ['pythonaccount@pythonsheet-346808.iam.gserviceaccount.com','remicrepin25@gmail.com','technique.cnba@gmail.com'])
     print('---------- SUCCESS SHEET RENAMED AND FILLED IN')
 
@@ -465,164 +654,22 @@ def create_presence_spreadsheet(membres_groupe, client, groupe, conf, test=False
         month_name = datetime.date(2025, month, 1).strftime("%B")
         print(f'------ ADDING SHEET FOR {BLUE}{month_name}{RESET}')
         worksheet = file.add_worksheet(title=month_name, rows=100, cols=50)
-        
-        #TITLE 
-        print(f'---------- ADDING TITLE')
-        """
-        worksheet.update('A1',month_name)
-        worksheet.format("A1", { 'backgroundColor': {
-                                                    'red':236/255,
-                                                    'green':155/255,
-                                                    'blue':155/255},
-                                'textFormat': {'bold': True}})
-        """
-        requests = [
-            {
-                "updateCells": {
-                    "range": {
-                        "sheetId": worksheet.id,
-                        "startRowIndex": 0,
-                        "endRowIndex": 1,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": 1
-                    },
-                    "rows": [
-                        {
-                            "values": [
-                                {
-                                    "userEnteredValue": {"stringValue": month_name},
-                                    "userEnteredFormat": {
-                                        "backgroundColor": {
-                                            "red": 236/255,
-                                            "green": 155/255,
-                                            "blue": 155/255
-                                        },
-                                        "textFormat": {"bold": True}
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    "fields": "userEnteredValue,userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold"
-                }
-            }
-        ]
-        worksheet.spreadsheet.batch_update({"requests": requests})
 
-        #IMPORT GROUPE VALUES
-        print(f'---------- ADDING GROUPE NAMES')
-        worksheet.update([['=IMPORTRANGE(Groupe!D2;"Groupe!A2:C30")']],'A4', value_input_option='USER_ENTERED')
-
-        #DATES
-        print(f'---------- ADDING DATES')
-        worksheet.update_acell('C2','Dates')
-        worksheet.format("C2", { 'backgroundColor': {
-                                                    'red':252/255,
-                                                    'green':202/255,
-                                                    'blue':159/255}})
-        #GET DATES depending on GROUP
+        #GET DATES DEPENDING ON GROUP
         if groupe["id"] not in (2,5):
             results = date_global(month)
         elif groupe["id"] == 2: #Elite
             results = date_elite(month)
         elif groupe["id"] == 5: #EJ2
             results = date_global(month)
-        
-        list_collumns = results[0]
-        indexes = results[1]
-        dates = results[2]
-        days_names = results[3]
 
-        range_cols = f'{list_collumns[0]}:{list_collumns[-3]}'
-        range_dates = f'{list_collumns[0]}2:{list_collumns[-3]}2'
-        range_days = f'{list_collumns[0]}3:{list_collumns[-3]}3'
-
-        #print(dates)
-        #print(days_names)
-        #print(range_dates)
-        
-        worksheet.update(range_dates,[dates])
-
-        worksheet.format(range_dates, { 'backgroundColor': {
-                                                    'red':252/255,
-                                                    'green':202/255,
-                                                    'blue':159/255},
-                                        'textRotation': {
-                                                    'angle' : 90}})
-        
-
-        #JOURS
-        print(f'---------- ADDING DAYS')
-        worksheet.update_acell('C3','Jours')
-        worksheet.format("C3", { 'backgroundColor': {
-                                                    'red':156/255,
-                                                    'green':198/255,
-                                                    'blue':230/255}})
-        worksheet.update(range_days,[days_names])
-        worksheet.format(range_days, { 'backgroundColor': {
-                                                'red':156/255,
-                                                'green':198/255,
-                                                'blue':230/255}})
-
-        #ADD DATA COUNT
-        worksheet.add_cols(2)
-        worksheet.update(f'{list_collumns[-2]}3:{list_collumns[-1]}3',[['Présences %','Nbre Entr.']])
-
-        if add_conditional_format:
-            set_presence_conditional_format(
-                worksheet,
-                column_letter_to_index(list_collumns[-3]) + 1,
-                len(membres_groupe)
-            )
-        
-        #PERCENTAGE
-        print(f'---------- ADDING PERCENTAGE')
-        formulas_list_percent = []
-        formulas_list_presence = []
-        for i in range(len(membres_groupe.values.tolist())):
-            range_pourcentage = f'D{i+4}:{list_collumns[-3]}{i+4}'
-            formulas_list_percent.append([f'=NB.SI({range_pourcentage};"v")/(${list_collumns[-2]}$1-NB.VIDE({range_pourcentage})-NB.SI({range_pourcentage};"b")-NB.SI({range_pourcentage};"o")-NB.SI({range_pourcentage};"m"))'])
-            formulas_list_presence.append([f'=NB.SI({range_pourcentage};"v")'])
-
-        range_formulas = f'{list_collumns[-2]}4:{list_collumns[-2]}{str(3+len(membres_groupe.values.tolist()))}'
-        worksheet.update(range_formulas,
-                            formulas_list_percent, 
-                            value_input_option='USER_ENTERED')
-        
-        worksheet.format(range_formulas, { 'numberFormat': {
-                                                'type': 'PERCENT'}})
-        
-        #NUMBER EMPTY CELLS
-        worksheet.update([[f'=NB.VIDE(D1:{list_collumns[-3]}1)']], 
-                         f'{list_collumns[-2]}1',
-                         value_input_option='USER_ENTERED')
-        
-        #NUMBER TRAINING
-        print(f'---------- ADDING NB TRAININGS')
-        range_presence = f'{list_collumns[-1]}4:{list_collumns[-1]}{str(3+len(membres_groupe.values.tolist()))}'
-        worksheet.update(range_presence,
-                            formulas_list_presence, 
-                            value_input_option='USER_ENTERED')
-        
-        #NUMBER OF SWIMMERS
-        print(f'---------- ADDING NB SWIMMERS')
-        range_swimmers_formulas = f'{list_collumns[0]}{str(5+len(membres_groupe.values.tolist()))}:{list_collumns[-3]}{str(5+len(membres_groupe.values.tolist()))}'
-        formulas_list_swimmers = []
-        for i,day in enumerate(dates):
-            range_swimmer = f'{list_collumns[i]}4:{list_collumns[i]}{str(3+len(membres_groupe.values.tolist()))}'
-            formulas_list_swimmers.append(f'=NB.SI({range_swimmer};"v")')
-
-        worksheet.update(range_swimmers_formulas,
-                            [formulas_list_swimmers], 
-                            value_input_option='USER_ENTERED')
-        
-        #AUTO RESIZE COLUMNS WIDTH
-        worksheet.columns_auto_resize(indexes[0],indexes[1])
-        #PROTECTED RANGE
-        worksheet.add_protected_range('A1:C40', ['technique.cnba@gmail.com'])
-        
-        print(f'{YELLOW}##### SLEEPING {sleep} SECONDS BETWEEN WORKSHEET #####{RESET}')
-        time.sleep(sleep)
+        populate_presence_month(
+            worksheet,
+            month_name,
+            results,
+            len(membres_groupe),
+            add_conditional_format=add_conditional_format
+        )
 
 def create_spreadsheets(conf, update=False, test=False, list_groups=[], add_conditional_format=True):
     
@@ -833,6 +880,8 @@ def add_presence_conditional_formatting(spreadsheet, swimmer_count):
 
     if not updated:
         print(f'{YELLOW}---- NO MISSING CONDITIONAL FORMAT ----{RESET}')
+    else:
+        print(f'{GREEN}---- ADDED CONDITIONAL FORMAT ----{RESET}')
 
     return updated
 
@@ -980,9 +1029,6 @@ def missing_months(spreadsheet,list_months):
     return months_to_add_numbers
 
 def add_months(groupe, spreadsheet, membres_groupe_db, list_months=[9,10,11,12,1,2,3,4,5,6], add_conditional_format=True):
-    sleep = 20
-    file = spreadsheet
-
     list_missing_month = missing_months(spreadsheet,list_months)
 
     if len(list_missing_month) >= 1:
@@ -991,165 +1037,23 @@ def add_months(groupe, spreadsheet, membres_groupe_db, list_months=[9,10,11,12,1
         for month in list_missing_month: #REMOVE RANGE FOR PROD
             month_name = datetime.date(2025, month, 1).strftime("%B")
             print(f'{BLUE}------ ADDING SHEET FOR {month_name}{RESET}')
-            worksheet = file.add_worksheet(title=month_name, rows=100, cols=50)
-            
-            #TITLE 
-            print(f'---------- ADDING TITLE')
-            """
-            worksheet.update('A1',month_name)
-            worksheet.format("A1", { 'backgroundColor': {
-                                                        'red':236/255,
-                                                        'green':155/255,
-                                                        'blue':155/255},
-                                    'textFormat': {'bold': True}})
-            """
-            requests = [
-                {
-                    "updateCells": {
-                        "range": {
-                            "sheetId": worksheet.id,
-                            "startRowIndex": 0,
-                            "endRowIndex": 1,
-                            "startColumnIndex": 0,
-                            "endColumnIndex": 1
-                        },
-                        "rows": [
-                            {
-                                "values": [
-                                    {
-                                        "userEnteredValue": {"stringValue": month_name},
-                                        "userEnteredFormat": {
-                                            "backgroundColor": {
-                                                "red": 236/255,
-                                                "green": 155/255,
-                                                "blue": 155/255
-                                            },
-                                            "textFormat": {"bold": True}
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        "fields": "userEnteredValue,userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold"
-                    }
-                }
-            ]
-            worksheet.spreadsheet.batch_update({"requests": requests})
-            
-            #IMPORT GROUPE VALUES
-            print(f'---------- ADDING GROUPE NAMES')
-            worksheet.update([['=IMPORTRANGE(Groupe!D2;"Groupe!A2:C30")']],'A4', value_input_option='USER_ENTERED')
+            worksheet = spreadsheet.add_worksheet(title=month_name, rows=100, cols=50)
 
-            #DATES
-            print(f'---------- ADDING DATES')
-            worksheet.update_acell('C2','Dates')
-            worksheet.format("C2", { 'backgroundColor': {
-                                                        'red':252/255,
-                                                        'green':202/255,
-                                                        'blue':159/255}})
-            #GET DATES depending on GROUP
+            #GET DATES DEPENDING ON GROUP
             if groupe not in (2,5):
                 results = date_global(month)
             elif groupe == 2: #Elite
                 results = date_elite(month)
             elif groupe == 5: #EJ2
                 results = date_global(month)
-            
-            list_collumns = results[0]
-            indexes = results[1]
-            dates = results[2]
-            days_names = results[3]
 
-            range_cols = f'{list_collumns[0]}:{list_collumns[-3]}'
-            range_dates = f'{list_collumns[0]}2:{list_collumns[-3]}2'
-            range_days = f'{list_collumns[0]}3:{list_collumns[-3]}3'
-
-            #print(dates)
-            #print(days_names)
-            #print(range_dates)
-            
-            worksheet.update(range_dates,[dates])
-
-            worksheet.format(range_dates, { 'backgroundColor': {
-                                                        'red':252/255,
-                                                        'green':202/255,
-                                                        'blue':159/255},
-                                            'textRotation': {
-                                                        'angle' : 90}})
-            
-
-            #JOURS
-            print(f'---------- ADDING DAYS')
-            worksheet.update_acell('C3','Jours')
-            worksheet.format("C3", { 'backgroundColor': {
-                                                        'red':156/255,
-                                                        'green':198/255,
-                                                        'blue':230/255}})
-            worksheet.update(range_days,[days_names])
-            worksheet.format(range_days, { 'backgroundColor': {
-                                                    'red':156/255,
-                                                    'green':198/255,
-                                                    'blue':230/255}})
-
-            #ADD DATA COUNT
-            worksheet.add_cols(2)
-            worksheet.update(f'{list_collumns[-2]}3:{list_collumns[-1]}3',[['Présences %','Nbre Entr.']])
-
-            if add_conditional_format:
-                set_presence_conditional_format(
-                    worksheet,
-                    column_letter_to_index(list_collumns[-3]) + 1,
-                    len(membres_groupe_db)
-                )
-            
-            #PERCENTAGE
-            print(f'---------- ADDING PERCENTAGE')
-            formulas_list_percent = []
-            formulas_list_presence = []
-            for i in range(len(membres_groupe_db)):
-                range_pourcentage = f'D{i+4}:{list_collumns[-3]}{i+4}'
-                formulas_list_percent.append([f'=NB.SI({range_pourcentage};"v")/(${list_collumns[-2]}$1-NB.VIDE({range_pourcentage})-NB.SI({range_pourcentage};"b")-NB.SI({range_pourcentage};"o")-NB.SI({range_pourcentage};"m"))'])
-                formulas_list_presence.append([f'=NB.SI({range_pourcentage};"v")'])
-
-            range_formulas = f'{list_collumns[-2]}4:{list_collumns[-2]}{str(3+len(membres_groupe_db))}'
-            worksheet.update(range_formulas,
-                                formulas_list_percent, 
-                                value_input_option='USER_ENTERED')
-            
-            worksheet.format(range_formulas, { 'numberFormat': {
-                                                    'type': 'PERCENT'}})
-            
-            #NUMBER EMPTY CELLS
-            worksheet.update([[f'=NB.VIDE(D1:{list_collumns[-3]}1)']], 
-                                f'{list_collumns[-2]}1',
-                                value_input_option='USER_ENTERED')
-            
-            #NUMBER TRAINING
-            print(f'---------- ADDING NB TRAININGS')
-            range_presence = f'{list_collumns[-1]}4:{list_collumns[-1]}{str(3+len(membres_groupe_db))}'
-            worksheet.update(range_presence,
-                                formulas_list_presence, 
-                                value_input_option='USER_ENTERED')
-            
-            #NUMBER OF SWIMMERS
-            print(f'---------- ADDING NB SWIMMERS')
-            range_swimmers_formulas = f'{list_collumns[0]}{str(5+len(membres_groupe_db))}:{list_collumns[-3]}{str(5+len(membres_groupe_db))}'
-            formulas_list_swimmers = []
-            for i,day in enumerate(dates):
-                range_swimmer = f'{list_collumns[i]}4:{list_collumns[i]}{str(3+len(membres_groupe_db))}'
-                formulas_list_swimmers.append(f'=NB.SI({range_swimmer};"v")')
-
-            worksheet.update(range_swimmers_formulas,
-                                [formulas_list_swimmers], 
-                                value_input_option='USER_ENTERED')
-            
-            #AUTO RESIZE COLUMNS WIDTH
-            worksheet.columns_auto_resize(indexes[0],indexes[1])
-             #PROTECTED RANGE
-            worksheet.add_protected_range('A1:C40', ['technique.cnba@gmail.com'])
-
-            print(f'{YELLOW}##### SLEEPING {sleep} SECONDS BETWEEN WORKSHEET #####{RESET}')
-            time.sleep(sleep)
+            populate_presence_month(
+                worksheet,
+                month_name,
+                results,
+                len(membres_groupe_db),
+                add_conditional_format=add_conditional_format
+            )
     else:
         print(f'{YELLOW}---- NO MISSING MONTH ----{RESET}')
 
