@@ -14,6 +14,7 @@ import urllib.parse
 import string
 import itertools
 import gspread
+from gspread.http_client import BackOffHTTPClient
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import pymysql
@@ -124,7 +125,9 @@ def init_client_drive():
     if not os.path.isabs(file_name):
         file_name = os.path.join(os.path.dirname(__file__), file_name)
     creds = ServiceAccountCredentials.from_json_keyfile_name(file_name,scope)
-    client = gspread.authorize(creds) 
+    # Retry quota errors with exponential backoff instead of failing or sleeping
+    # after every worksheet operation.
+    client = gspread.authorize(creds, http_client=BackOffHTTPClient)
 
     return client
 
